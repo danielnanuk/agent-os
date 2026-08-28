@@ -1,0 +1,90 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: agent-runtime
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:agent_runtime}
+    username: ${DB_USER:agent_runtime}
+    password: ${DB_PASSWORD:agent_runtime}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+  flyway:
+    enabled: true
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6380}
+
+  ai:
+    # RAG embeddings are a platform-wide setting (independent of per-agent LLM choice)
+    # -- pin to OpenAI's embedding autoconfiguration so PgVectorStore (which requires
+    # exactly one EmbeddingModel bean) doesn't see an ambiguous choice. Chat models are
+    # NOT configured here: each `llm_models` DB row carries its own provider/base-url/
+    # api-key-env/model-name, and ChatModelResolver builds a client per row on demand
+    # (see agent-runtime-llm/resolver/ChatModelResolver) -- these Spring-managed
+    # OpenAI/Anthropic/Ollama chat beans are unused.
+    model:
+      embedding: openai
+    openai:
+      api-key: ${OPENAI_API_KEY:}
+      embedding:
+        base-url: https://api.openai.com
+        model: text-embedding-3-small
+
+    vectorstore:
+      pgvector:
+        initialize-schema: false
+        dimensions: 1536
+        distance-type: COSINE_DISTANCE
+        index-type: HNSW
+
+    mcp:
+      server:
+        name: agent-runtime
+        version: 0.1.0
+        protocol: STREAMABLE
+        annotation-scanner:
+          enabled: true
+      # Client role is opt-in: uncomment and point at a real MCP server to exercise
+      # the client-side vertical slice (e.g. the reference filesystem server run via
+      # `npx -y @modelcontextprotocol/server-filesystem /tmp`).
+      # client:
+      #   stdio:
+      #     connections:
+      #       filesystem:
+      #         command: npx
+      #         args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+
+  temporal:
+    connection:
+      target: ${TEMPORAL_TARGET:127.0.0.1:7233}
+    namespace: default
+    workers-auto-discovery:
+      packages: ai.pivot360.agents.temporal.workflow
+    workers:
+      - task-queue: agent-runtime-default
+
+# Tavily (https://tavily.com) backs the web_search tool. Without a key the tool still
+# registers (so agent definitions listing it don't break) but fails at call time.
+tavily:
+  api-key: ${TAVILY_API_KEY:}
+  base-url: ${TAVILY_BASE_URL:https://api.tavily.com}
+
+# Realtime voice: VoiceSessionController issues LiveKit room tokens; the actual voice
+# pipeline (STT/LLM/TTS/avatar) runs in the separate Python voice-worker.
+livekit:
+  api-key: ${LIVEKIT_API_KEY:}
+  api-secret: ${LIVEKIT_API_SECRET:}
+  url: ${LIVEKIT_URL:}
+
+logging:
+  level:
+    ai.pivot360.agents: INFO

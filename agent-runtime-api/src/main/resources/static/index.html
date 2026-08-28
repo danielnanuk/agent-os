@@ -1,0 +1,769 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Runtime - Chat</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --border: #e2e5ea;
+    --text: #1a1d23;
+    --muted: #6b7280;
+    --accent: #2563eb;
+    --user-bubble: #2563eb;
+    --user-text: #ffffff;
+    --assistant-bubble: #ffffff;
+    --tool-bubble: #f0f4ff;
+    --error: #dc2626;
+    --success: #16a34a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181d;
+      --panel: #1f2229;
+      --border: #2c3038;
+      --text: #e6e8eb;
+      --muted: #9aa0aa;
+      --accent: #5b8def;
+      --user-bubble: #3b6fd6;
+      --user-text: #ffffff;
+      --assistant-bubble: #262a32;
+      --tool-bubble: #20283a;
+      --error: #f87171;
+      --success: #4ade80;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  header h1 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0;
+    white-space: nowrap;
+  }
+  .field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .field input {
+    font-size: 13px;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    width: 140px;
+  }
+  #status-badge {
+    margin-left: auto;
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: var(--border);
+    color: var(--muted);
+  }
+  #status-badge.RUNNING { background: #fef3c7; color: #92400e; }
+  #status-badge.COMPLETED { background: #dcfce7; color: #166534; }
+  #status-badge.FAILED { background: #fee2e2; color: #991b1b; }
+  main {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-width: 760px;
+    width: 100%;
+    margin: 0 auto;
+  }
+  .row { display: flex; }
+  .row.user { justify-content: flex-end; }
+  .row.assistant, .row.tool { justify-content: flex-start; }
+  .bubble {
+    max-width: 80%;
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: 14px;
+    line-height: 1.5;
+    word-break: break-word;
+  }
+  .row.user .bubble {
+    background: var(--user-bubble);
+    color: var(--user-text);
+    border-bottom-right-radius: 3px;
+    white-space: pre-wrap;
+  }
+  .row.assistant .bubble {
+    background: var(--assistant-bubble);
+    border: 1px solid var(--border);
+    border-bottom-left-radius: 3px;
+  }
+  /* Markdown rendering inside assistant bubbles */
+  .bubble p { margin: 0 0 8px; }
+  .bubble p:last-child { margin-bottom: 0; }
+  .bubble h1, .bubble h2, .bubble h3 { margin: 10px 0 6px; font-size: 1em; }
+  .bubble h1:first-child, .bubble h2:first-child, .bubble h3:first-child { margin-top: 0; }
+  .bubble ul, .bubble ol { margin: 0 0 8px; padding-left: 20px; }
+  .bubble li { margin-bottom: 2px; }
+  .bubble code {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 0.9em;
+    background: rgba(127, 127, 127, 0.18);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  .bubble pre {
+    background: rgba(127, 127, 127, 0.14);
+    padding: 10px 12px;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 0 0 8px;
+  }
+  .bubble pre code { background: none; padding: 0; }
+  .bubble a { color: var(--accent); }
+  .row.tool .bubble {
+    background: var(--tool-bubble);
+    border: 1px solid var(--border);
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    color: var(--muted);
+    padding: 8px 10px;
+  }
+  .tool-summary {
+    cursor: pointer;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+    list-style: none;
+  }
+  .tool-summary::-webkit-details-marker { display: none; }
+  .tool-summary::before {
+    content: '▶';
+    display: inline-block;
+    margin-right: 6px;
+    font-size: 9px;
+    transition: transform 0.15s;
+  }
+  details[open] > .tool-summary::before { transform: rotate(90deg); }
+  .tool-body {
+    white-space: pre-wrap;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
+  }
+  .thinking .bubble {
+    color: var(--muted);
+    font-style: italic;
+  }
+  .error-text { color: var(--error); font-size: 13px; margin-top: 4px; }
+  footer {
+    padding: 14px 20px;
+    border-top: 1px solid var(--border);
+    background: var(--panel);
+  }
+  form {
+    max-width: 760px;
+    margin: 0 auto;
+    display: flex;
+    gap: 8px;
+  }
+  #input {
+    flex: 1;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+  }
+  button {
+    padding: 10px 18px;
+    border-radius: 10px;
+    border: none;
+    background: var(--accent);
+    color: white;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .empty {
+    color: var(--muted);
+    text-align: center;
+    margin-top: 40px;
+    font-size: 13px;
+  }
+  #voice-btn {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 6px 14px;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  #voice-btn.in-call {
+    background: var(--error);
+    color: white;
+    border-color: var(--error);
+  }
+  #voice-panel {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.75);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+  #voice-panel.open { display: flex; }
+  #voice-panel-card {
+    background: var(--panel);
+    border-radius: 16px;
+    padding: 20px;
+    width: min(420px, 90vw);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+  }
+  #avatar-video-wrap {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+  #avatar-video-wrap video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  #avatar-placeholder {
+    color: #6b7280;
+    font-size: 40px;
+  }
+  #voice-status-text {
+    color: var(--text);
+    font-size: 14px;
+    text-align: center;
+  }
+  #voice-status-text .sub {
+    display: block;
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 4px;
+  }
+  #voice-hangup-btn {
+    background: var(--error);
+    color: white;
+    border-radius: 999px;
+    width: 52px;
+    height: 52px;
+    padding: 0;
+    font-size: 20px;
+  }
+  #enable-playback-btn {
+    background: #f59e0b;
+    color: white;
+    font-size: 13px;
+    padding: 8px 16px;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Agent Runtime</h1>
+  <div class="field">
+    <label>Tenant</label>
+    <input id="tenantId" value="acme-corp">
+  </div>
+  <div class="field">
+    <label>Agent</label>
+    <input id="agentKey" value="general-assistant">
+  </div>
+  <button id="voice-btn" type="button">🎙️ 语音通话</button>
+  <span id="status-badge">IDLE</span>
+</header>
+
+<div id="voice-panel">
+  <div id="voice-panel-card">
+    <div id="avatar-video-wrap">
+      <span id="avatar-placeholder">🎙️</span>
+    </div>
+    <div id="voice-status-text"><span id="voice-status-main">连接中…</span><span class="sub" id="voice-status-sub"></span></div>
+    <button id="enable-playback-btn" type="button" style="display:none;">🔇 点击开启画面/声音</button>
+    <button id="voice-hangup-btn" type="button" title="挂断">✕</button>
+  </div>
+</div>
+
+<main id="log">
+  <div class="empty" id="empty-hint">还没有对话。每次发送都会启动一个独立的 Agent Run（工具调用可见），暂不带跨轮上下文记忆。</div>
+</main>
+
+<footer>
+  <form id="chat-form">
+    <input id="input" type="text" placeholder="输入你的问题…" autocomplete="off" required>
+    <button id="send-btn" type="submit">发送</button>
+  </form>
+</footer>
+
+<script src="/vendor/livekit-client.min.js"></script>
+<script>
+const log = document.getElementById('log');
+const emptyHint = document.getElementById('empty-hint');
+const form = document.getElementById('chat-form');
+const input = document.getElementById('input');
+const sendBtn = document.getElementById('send-btn');
+const tenantIdInput = document.getElementById('tenantId');
+const agentKeyInput = document.getElementById('agentKey');
+const statusBadge = document.getElementById('status-badge');
+
+let currentConversationId = null;
+
+for (const [id, el] of [['tenantId', tenantIdInput], ['agentKey', agentKeyInput]]) {
+  const saved = localStorage.getItem(id);
+  if (saved) el.value = saved;
+  el.addEventListener('change', () => {
+    localStorage.setItem(id, el.value);
+    currentConversationId = null; // switching tenant/agent starts a fresh conversation
+  });
+}
+
+function setStatus(text) {
+  statusBadge.textContent = text;
+  statusBadge.className = text;
+}
+
+// Minimal markdown -> HTML renderer for LLM output: headers, bold/italic, inline code,
+// fenced code blocks, links, and lists. Escapes raw text first so nothing the model (or a
+// web_search result it quotes) emits can inject markup.
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function renderInline(text) {
+  let html = escapeHtml(text);
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>');
+  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  return html;
+}
+
+function renderMarkdown(text) {
+  const lines = text.split('\n');
+  let html = '';
+  let inCodeBlock = false;
+  let codeBuffer = [];
+  let listBuffer = [];
+  let listType = null;
+
+  function flushList() {
+    if (listBuffer.length) {
+      html += '<' + listType + '>' + listBuffer.map(li => '<li>' + renderInline(li) + '</li>').join('') + '</' + listType + '>';
+      listBuffer = [];
+      listType = null;
+    }
+  }
+
+  for (const line of lines) {
+    if (line.startsWith('```')) {
+      if (inCodeBlock) {
+        html += '<pre><code>' + escapeHtml(codeBuffer.join('\n')) + '</code></pre>';
+        codeBuffer = [];
+        inCodeBlock = false;
+      } else {
+        flushList();
+        inCodeBlock = true;
+      }
+      continue;
+    }
+    if (inCodeBlock) {
+      codeBuffer.push(line);
+      continue;
+    }
+    const headerMatch = line.match(/^(#{1,3})\s+(.*)/);
+    if (headerMatch) {
+      flushList();
+      const level = headerMatch[1].length;
+      html += '<h' + level + '>' + renderInline(headerMatch[2]) + '</h' + level + '>';
+      continue;
+    }
+    const ulMatch = line.match(/^[-*]\s+(.*)/);
+    const olMatch = line.match(/^\d+\.\s+(.*)/);
+    if (ulMatch) {
+      if (listType !== 'ul') { flushList(); listType = 'ul'; }
+      listBuffer.push(ulMatch[1]);
+      continue;
+    }
+    if (olMatch) {
+      if (listType !== 'ol') { flushList(); listType = 'ol'; }
+      listBuffer.push(olMatch[1]);
+      continue;
+    }
+    flushList();
+    if (line.trim() !== '') {
+      html += '<p>' + renderInline(line) + '</p>';
+    }
+  }
+  flushList();
+  if (inCodeBlock) {
+    html += '<pre><code>' + escapeHtml(codeBuffer.join('\n')) + '</code></pre>';
+  }
+  return html;
+}
+
+function addRow(role, text, toolName) {
+  emptyHint.remove();
+  const row = document.createElement('div');
+  row.className = 'row ' + role.toLowerCase();
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  if (role === 'TOOL') {
+    // Tool results (e.g. web_search) can be long -- collapse by default via <details>.
+    const details = document.createElement('details');
+    const summary = document.createElement('summary');
+    summary.className = 'tool-summary';
+    summary.textContent = 'tool: ' + toolName;
+    const body = document.createElement('div');
+    body.className = 'tool-body';
+    body.textContent = text;
+    details.appendChild(summary);
+    details.appendChild(body);
+    bubble.appendChild(details);
+  } else {
+    bubble.innerHTML = renderMarkdown(text);
+  }
+  row.appendChild(bubble);
+  log.appendChild(row);
+  log.scrollTop = log.scrollHeight;
+  return row;
+}
+
+function addThinkingRow() {
+  emptyHint.remove();
+  const row = document.createElement('div');
+  row.className = 'row assistant thinking';
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.textContent = '思考中…';
+  row.appendChild(bubble);
+  log.appendChild(row);
+  log.scrollTop = log.scrollHeight;
+  return row;
+}
+
+async function submitRun(tenantId, agentKey, taskInput, conversationId) {
+  const resp = await fetch('/api/v1/agent-runs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': tenantId },
+    body: JSON.stringify({ agentKey, input: taskInput, conversationId: conversationId || null })
+  });
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error('Submit failed (' + resp.status + '): ' + body);
+  }
+  return resp.json();
+}
+
+// EventSource can't send custom headers, and the API requires X-Tenant-Id, so we
+// parse the SSE stream manually over a fetch() response instead.
+async function streamRun(tenantId, runId, seenSeq, thinkingRow) {
+  const resp = await fetch('/api/v1/agent-runs/' + runId + '/stream', {
+    headers: { 'X-Tenant-Id': tenantId }
+  });
+  if (!resp.ok || !resp.body) {
+    throw new Error('Stream failed: ' + resp.status);
+  }
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let pendingToolName = null;
+  let terminal = false;
+  let streamingRow = null;
+  let streamingText = '';
+
+  function clearThinking() {
+    if (thinkingRow) {
+      thinkingRow.remove();
+      thinkingRow = null;
+    }
+  }
+
+  while (!terminal) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let sep;
+    while ((sep = buffer.indexOf('\n\n')) !== -1) {
+      const rawEvent = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+
+      let eventName = 'message';
+      let dataLine = '';
+      for (const line of rawEvent.split('\n')) {
+        if (line.startsWith('event:')) eventName = line.slice(6).trim();
+        else if (line.startsWith('data:')) dataLine += line.slice(5).trim();
+      }
+      if (!dataLine) continue;
+      const data = JSON.parse(dataLine);
+
+      if (eventName === 'history') {
+        // One-time replay of everything already persisted as of connect time.
+        if (seenSeq.has(data.sequenceNumber)) continue;
+        seenSeq.add(data.sequenceNumber);
+        if (data.role === 'USER') continue; // already rendered optimistically on submit
+        if (data.role === 'ASSISTANT' && !data.content) continue; // intermediate tool-call step, no text yet
+        clearThinking();
+        addRow(data.role, data.content, data.toolName);
+      } else if (eventName === 'status') {
+        // Only reflects the status at connect time; live changes arrive via 'progress'.
+        setStatus(data.status);
+      } else if (eventName === 'progress') {
+        // Live ReAct-loop steps pushed via Redis as the Temporal workflow executes.
+        switch (data.eventType) {
+          case 'LLM_DELTA':
+            clearThinking();
+            if (!streamingRow) {
+              streamingRow = addRow('ASSISTANT', '');
+              streamingText = '';
+            }
+            streamingText += data.payload;
+            streamingRow.querySelector('.bubble').innerHTML = renderMarkdown(streamingText);
+            log.scrollTop = log.scrollHeight;
+            break;
+          case 'LLM_THOUGHT':
+            // Content was already rendered incrementally via LLM_DELTA; this just marks
+            // the iteration's text as final (a no-op when it was a tool-call-only turn).
+            streamingRow = null;
+            streamingText = '';
+            break;
+          case 'TOOL_CALL_STARTED':
+            pendingToolName = data.payload;
+            break;
+          case 'TOOL_CALL_COMPLETED':
+            clearThinking();
+            addRow('TOOL', data.payload, pendingToolName);
+            pendingToolName = null;
+            break;
+          case 'RUN_COMPLETED':
+            setStatus('COMPLETED');
+            terminal = true;
+            break;
+          case 'RUN_FAILED':
+            clearThinking();
+            setStatus('FAILED');
+            addRow('ASSISTANT', '出错了: ' + data.payload);
+            terminal = true;
+            break;
+        }
+      }
+    }
+  }
+  // The server closes the connection once it sees a terminal event too, but cancel our
+  // end explicitly as well so a slow/failed server-side close doesn't leave the
+  // underlying connection (and this reader) hanging open.
+  reader.cancel().catch(() => {});
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const tenantId = tenantIdInput.value.trim();
+  const agentKey = agentKeyInput.value.trim();
+  const text = input.value.trim();
+  if (!tenantId || !agentKey || !text) return;
+
+  input.value = '';
+  sendBtn.disabled = true;
+  addRow('USER', text);
+  const thinkingRow = addThinkingRow();
+  setStatus('PENDING');
+
+  try {
+    const { runId, conversationId } = await submitRun(tenantId, agentKey, text, currentConversationId);
+    currentConversationId = conversationId;
+    setStatus('RUNNING');
+    await streamRun(tenantId, runId, new Set(), thinkingRow);
+  } catch (err) {
+    thinkingRow.remove();
+    setStatus('FAILED');
+    addRow('ASSISTANT', '出错了: ' + err.message);
+  } finally {
+    sendBtn.disabled = false;
+    input.focus();
+  }
+});
+
+// ---- Realtime voice call (LiveKit) ----
+// Bootstraps via POST /api/v1/voice-sessions (issues a LiveKit room token, see
+// VoiceSessionController), then joins the room directly from the browser with the
+// vendored livekit-client SDK. The Python voice-worker is auto-dispatched into the
+// room by LiveKit once a participant joins; its Spatius avatar video/audio tracks are
+// rendered here as they get published. Reuses currentConversationId so a voice call
+// and the typed chat above share the same multi-turn conversation.
+const voiceBtn = document.getElementById('voice-btn');
+const voicePanel = document.getElementById('voice-panel');
+const avatarWrap = document.getElementById('avatar-video-wrap');
+const avatarPlaceholder = document.getElementById('avatar-placeholder');
+const voiceStatusMain = document.getElementById('voice-status-main');
+const voiceStatusSub = document.getElementById('voice-status-sub');
+const hangupBtn = document.getElementById('voice-hangup-btn');
+const enablePlaybackBtn = document.getElementById('enable-playback-btn');
+
+let voiceRoom = null;
+let voiceMediaElements = [];
+
+function setVoiceStatus(main, sub) {
+  voiceStatusMain.textContent = main;
+  voiceStatusSub.textContent = sub || '';
+}
+
+function attachVoiceTrack(track) {
+  const el = track.attach();
+  voiceMediaElements.push(el);
+  if (track.kind === LivekitClient.Track.Kind.Video) {
+    avatarPlaceholder.style.display = 'none';
+    avatarWrap.appendChild(el);
+  } else {
+    el.style.display = 'none';
+    document.body.appendChild(el); // audio element just needs to exist in the DOM to play
+  }
+}
+
+function detachVoiceTrack(track) {
+  for (const el of track.detach()) {
+    el.remove();
+    voiceMediaElements = voiceMediaElements.filter((e) => e !== el);
+  }
+}
+
+// Browsers block autoplay of media that starts outside a "recent user gesture" window --
+// our video/audio tracks arrive several seconds after the call button click (after the
+// STT->LLM->TTS->avatar round trip), so by the time they attach, that window has usually
+// closed. The element gets created and appended but silently never plays: no error, just
+// a blank/frozen box, which reads as "no avatar". LiveKit's client SDK detects this
+// itself (room.canPlaybackVideo/canPlaybackAudio) and exposes room.startVideo()/
+// startAudio() to retry playback from within a fresh click.
+function checkPlaybackBlocked(room) {
+  if (!room.canPlaybackAudio || !room.canPlaybackVideo) {
+    enablePlaybackBtn.style.display = '';
+  } else {
+    enablePlaybackBtn.style.display = 'none';
+  }
+}
+
+async function startVoiceCall() {
+  const tenantId = tenantIdInput.value.trim();
+  const agentKey = agentKeyInput.value.trim();
+  if (!tenantId || !agentKey) return;
+
+  voiceBtn.classList.add('in-call');
+  voiceBtn.textContent = '🎙️ 通话中…';
+  voicePanel.classList.add('open');
+  avatarPlaceholder.style.display = '';
+  setVoiceStatus('连接中…', '');
+
+  try {
+    const resp = await fetch('/api/v1/voice-sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': tenantId },
+      body: JSON.stringify({ agentKey })
+    });
+    if (!resp.ok) {
+      const body = await resp.text();
+      throw new Error('语音会话创建失败 (' + resp.status + '): ' + body);
+    }
+    const session = await resp.json();
+    currentConversationId = session.conversationId; // typed chat below continues this same conversation
+
+    const room = new LivekitClient.Room();
+    voiceRoom = room;
+
+    room.on(LivekitClient.RoomEvent.TrackSubscribed, (track) => {
+      attachVoiceTrack(track);
+      setVoiceStatus('通话中', 'AI 正在聆听');
+      checkPlaybackBlocked(room);
+    });
+    room.on(LivekitClient.RoomEvent.TrackUnsubscribed, detachVoiceTrack);
+    room.on(LivekitClient.RoomEvent.ParticipantConnected, (participant) => {
+      setVoiceStatus('AI 已接入', participant.identity);
+    });
+    room.on(LivekitClient.RoomEvent.AudioPlaybackStatusChanged, () => checkPlaybackBlocked(room));
+    room.on(LivekitClient.RoomEvent.VideoPlaybackStatusChanged, () => checkPlaybackBlocked(room));
+    room.on(LivekitClient.RoomEvent.Disconnected, endVoiceCall);
+
+    await room.connect(session.livekitUrl, session.livekitToken);
+    setVoiceStatus('等待 AI 接入…', '正在开启麦克风');
+    await room.localParticipant.setMicrophoneEnabled(true);
+    setVoiceStatus('通话中', '正在等待 AI 加入房间…');
+  } catch (err) {
+    setVoiceStatus('连接失败', err.message);
+    setTimeout(endVoiceCall, 2500);
+  }
+}
+
+function endVoiceCall() {
+  if (!voiceRoom) return;
+  const room = voiceRoom;
+  voiceRoom = null; // set first: room.disconnect() re-fires 'Disconnected' -> re-entrant call is a no-op
+  room.disconnect();
+  for (const el of voiceMediaElements) el.remove();
+  voiceMediaElements = [];
+  enablePlaybackBtn.style.display = 'none';
+  voicePanel.classList.remove('open');
+  voiceBtn.classList.remove('in-call');
+  voiceBtn.textContent = '🎙️ 语音通话';
+}
+
+voiceBtn.addEventListener('click', () => {
+  if (voiceRoom) {
+    endVoiceCall();
+  } else {
+    startVoiceCall();
+  }
+});
+hangupBtn.addEventListener('click', endVoiceCall);
+enablePlaybackBtn.addEventListener('click', async () => {
+  if (!voiceRoom) return;
+  try {
+    await voiceRoom.startAudio();
+    await voiceRoom.startVideo();
+    checkPlaybackBlocked(voiceRoom);
+  } catch (err) {
+    console.error('failed to start playback', err);
+  }
+});
+</script>
+</body>
+</html>
