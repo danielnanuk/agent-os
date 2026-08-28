@@ -1,86 +1,59 @@
 # voice-worker
 
-LiveKit Agents worker for realtime voice calls. This is a separate Python service
-(not part of the Java/Maven build) because `livekit-agents` -- the STT→LLM→TTS
-orchestration framework -- only ships Python/Node.js SDKs.
+用于实时语音通话的 LiveKit Agents worker。这是一个独立的 Python 服务（不属于 Java/Maven 构建），因为 `livekit-agents`（STT→LLM→TTS 编排框架）官方只提供 Python/Node.js SDK。
 
-**All reasoning and tool calling happens in the Java `agent-runtime-api` backend.**
-This worker is purely the voice input/output layer: it joins a LiveKit room, runs
-ElevenLabs STT/TTS, forwards each user utterance to the Java backend over HTTP, and
-relays the backend's streamed `LLM_DELTA` events back into LiveKit's TTS pipeline (see
-`backend_llm.py`). A Spatius avatar renders the agent's speech as a lip-synced video
-track (see `worker.py`).
+**所有推理和工具调用都发生在 Java 的 `agent-runtime-api` 后端。** 这个 worker 纯粹是语音输入输出层：加入一个 LiveKit 房间、跑 ElevenLabs 的 STT/TTS、把每一句用户话语转发给 Java 后端（走 HTTP），再把后端流式返回的 `LLM_DELTA` 事件转接回 LiveKit 的 TTS 流水线（见 `backend_llm.py`）。Spatius 头像把 Agent 的语音渲染成对口型的视频轨道（见 `worker.py`）。
 
-## Setup
+## 环境搭建
 
 ```bash
 cd voice-worker
 python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install -e .
-cp .env.example .env  # fill in real values; .env is gitignored, .env.example is not
+cp .env.example .env  # 填入真实值；.env 已加入 .gitignore，.env.example 没有
 ```
 
-## Configuration (environment variables)
+## 配置（环境变量）
 
-| Var | Required | Purpose |
+| 变量 | 是否必需 | 用途 |
 |---|---|---|
-| `LIVEKIT_URL` | yes | LiveKit server WebSocket URL, e.g. `wss://your-project.livekit.cloud` |
-| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | yes | Same LiveKit project credentials the Java backend's `VoiceSessionController` uses to issue caller tokens |
-| `ELEVEN_API_KEY` | yes | Read automatically by the `livekit-plugins-elevenlabs` STT/TTS classes (note: `ELEVEN_`, not `ELEVENLABS_`) |
-| `AGENT_RUNTIME_BASE_URL` | no (default `http://localhost:8080`) | Base URL of the Java `agent-runtime-api` |
-| `SPATIUS_AVATAR_ID` | no | If set, routes agent speech through a Spatius avatar instead of publishing raw audio directly |
-| `SPATIUS_API_KEY` / `SPATIUS_APP_ID` | only if `SPATIUS_AVATAR_ID` is set | Read automatically by `livekit-plugins-spatius`'s `AvatarSession` |
-| `SPATIUS_REGION` | no (default `auto`) | Pins the Spatius rendering/ingress region instead of letting their bootstrap API auto-select one. See "Avatar video is a black box" below. |
+| `LIVEKIT_URL` | 是 | LiveKit 服务器的 WebSocket 地址，如 `wss://your-project.livekit.cloud` |
+| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | 是 | 跟 Java 后端 `VoiceSessionController` 用来签发通话方 token 的是同一套 LiveKit 项目凭证 |
+| `ELEVEN_API_KEY` | 是 | 被 `livekit-plugins-elevenlabs` 的 STT/TTS 类自动读取（注意是 `ELEVEN_`，不是 `ELEVENLABS_`） |
+| `AGENT_RUNTIME_BASE_URL` | 否（默认 `http://localhost:8080`） | Java `agent-runtime-api` 的基础地址 |
+| `SPATIUS_AVATAR_ID` | 否 | 设置了的话，Agent 的语音会经过 Spatius 头像渲染，而不是直接发布原始音频 |
+| `SPATIUS_API_KEY` / `SPATIUS_APP_ID` | 只有设了 `SPATIUS_AVATAR_ID` 才需要 | 被 `livekit-plugins-spatius` 的 `AvatarSession` 自动读取 |
+| `SPATIUS_REGION` | 否（默认 `auto`） | 固定 Spatius 的渲染/接入区域，而不是让它的 bootstrap API 自动选。见下文"头像画面是黑屏"。 |
 
-## Troubleshooting: avatar video is a black box (audio works fine)
+## 排查记录：头像视频画面是黑屏（音频正常）
 
-Confirmed via browser WebRTC stats (`RTCPeerConnection.getStats()`) during testing: audio
-plays normally, but the video `inbound-rtp` report shows `framesDecoded: 0` and
-`framesDropped` equal to `framesReceived` -- every video packet arrives but not a single
-frame decodes (the player just keeps sending PLI requests for a fresh keyframe that never
-arrives intact). This is **not** a browser autoplay-block issue and not fixable from
-`static/index.html` -- the video bitstream itself is corrupted before it reaches the
-browser.
+测试中已经通过浏览器端的 WebRTC 统计数据（`RTCPeerConnection.getStats()`）确认过：音频播放完全正常，但视频的 `inbound-rtp` 报告显示 `framesDecoded: 0`，且 `framesDropped` 等于 `framesReceived` —— 每一个视频包都收到了，但没有一帧被成功解码（播放端一直在发 PLI 请求，要求重发一个完整的关键帧，但始终没等到）。这**不是**浏览器自动播放拦截问题，也不是 `static/index.html` 前端代码能修的 —— 视频码流在到达浏览器之前就已经是坏的了。
 
-Spatius's `auto` region resolution picked `cn-beijing` in testing while the LiveKit Cloud
-room was hosted in Tokyo (`Japan A`) -- a mismatched/long network path looked like a
-plausible cause, so this was tested:
+Spatius 的 `auto` 区域解析在测试中选到了 `cn-beijing`，而 LiveKit Cloud 房间跑在东京（`Japan A`）—— 一条不匹配/过长的网络路径看起来是个说得通的原因，所以试过：
 
 ```bash
 SPATIUS_REGION=us-west LIVEKIT_URL=... python3 worker.py dev
 ```
 
-**Tried, did not fix it.** Re-running the same `getStats()` capture with `us-west` pinned
-showed the identical failure pattern (`framesDecoded: 0`, 100% frame drop) -- if anything
-the bytes-per-packet ratio was worse. This rules out region/routing as the cause and
-points at something systemic in Spatius's encode pipeline (or an account/avatar-id
-config issue), not fixable from this repo. Report it to Spatius support with the
-`getStats()` numbers (`framesReceived`/`framesDecoded`/`framesDropped`/`pliCount`/
-`bytesReceived` from the video `inbound-rtp` report) plus `avatar_id`/`app_id`.
+**试过了，没有解决。** 用同样的方法重新抓 `getStats()`，固定成 `us-west` 之后失败模式完全一样（`framesDecoded: 0`，100% 丢帧）—— 甚至每包的字节数比例还更差。这排除了区域/路由是根因的可能，指向 Spatius 编码流水线本身的系统性问题（或者是账号/avatar_id 配置问题），不是这个仓库能修的。需要带着上面这些 `getStats()` 数据（视频 `inbound-rtp` 报告里的 `framesReceived`/`framesDecoded`/`framesDropped`/`pliCount`/`bytesReceived`）以及 `avatar_id`/`app_id` 去找 Spatius 技术支持。
 
-## Manual verification without a real microphone (`test_call.py`)
+## 不用真麦克风做人工验证（`test_call.py`）
 
-A one-shot diagnostic script: connects to a LiveKit room as the caller (given a
-`{roomName, livekitUrl, livekitToken}` JSON blob, e.g. from `POST /api/v1/voice-sessions`),
-publishes a pre-recorded WAV as a fake microphone track, and logs room/participant/track
-events -- so the whole pipeline (worker dispatch, STT, backend round trip, TTS, avatar
-join) can be exercised end-to-end without a human or a real mic:
+一个一次性的诊断脚本：以通话方身份连进一个 LiveKit 房间（传入一份 `{roomName, livekitUrl, livekitToken}` 的 JSON，比如 `POST /api/v1/voice-sessions` 的返回值），把一段预先录好的 WAV 当作假麦克风轨道发布出去，并打印房间/参与者/轨道相关的事件 —— 这样整条链路（worker 分配、STT、后端往返、TTS、头像加入）都能不靠真人、不靠真麦克风端到端跑一遍：
 
 ```bash
-say "what time is it" -o /tmp/test_speech.aiff  # macOS; use any TTS/recording elsewhere
+say "what time is it" -o /tmp/test_speech.aiff  # macOS；其他系统用任意 TTS/录音方式即可
 afconvert -f WAVE -d LEI16@16000 -c 1 /tmp/test_speech.aiff /tmp/test_speech.wav
 python3 test_call.py /tmp/voice_session.json /tmp/test_speech.wav
 ```
 
-This is also how the black-box-avatar issue above was actually diagnosed (paired with a
-Playwright script wrapping `RTCPeerConnection` to pull `getStats()` -- not checked in
-here since it's a throwaway diagnostic harness, not part of the worker).
+上面那个头像黑屏问题，实际上就是靠这个脚本（配合一段拦截 `RTCPeerConnection` 来抓 `getStats()` 的 Playwright 脚本）诊断出来的 —— 那个 Playwright 脚本没有收进这个仓库，因为它是一次性的诊断工具，不是 worker 本身的一部分。
 
-## Running locally
+## 本地运行
 
-1. Make sure `agent-runtime-api` (the Java backend) is running and reachable at `AGENT_RUNTIME_BASE_URL`.
-2. Start the worker in dev mode (auto-reloads, verbose logging, connects to LiveKit and waits for room dispatches):
+1. 确认 `agent-runtime-api`（Java 后端）已经在跑，并且能通过 `AGENT_RUNTIME_BASE_URL` 访问到。
+2. 以开发模式启动 worker（自动重连、详细日志，连上 LiveKit 后等待房间分配）：
 
    ```bash
    LIVEKIT_URL=wss://... LIVEKIT_API_KEY=... LIVEKIT_API_SECRET=... \
@@ -88,18 +61,8 @@ here since it's a throwaway diagnostic harness, not part of the worker).
    python3 worker.py dev
    ```
 
-3. Trigger a call: `POST /api/v1/voice-sessions {"agentKey": "general-assistant"}` on
-   the Java backend to get a `{roomName, livekitToken, livekitUrl, conversationId}`.
-   Connect any LiveKit client (e.g. the [Agents Playground](https://agents-playground.livekit.io/))
-   with that token/URL -- LiveKit auto-dispatches this worker to the room once a
-   participant joins.
+3. 触发一次通话：在 Java 后端调 `POST /api/v1/voice-sessions {"agentKey": "general-assistant"}`，拿到 `{roomName, livekitToken, livekitUrl, conversationId}`。用这个 token/URL 连上任意 LiveKit 客户端（比如 [Agents Playground](https://agents-playground.livekit.io/)）—— 一旦有参与者加入房间，LiveKit 会自动把这个 worker 分配进去。
 
-## Notes on API stability
+## 关于 API 稳定性的说明
 
-The exact `livekit-agents` / `livekit-plugins-elevenlabs` / `livekit-plugins-spatius`
-class and method signatures used in `backend_llm.py` and `worker.py` were verified via
-`python3 -c "import inspect; ..."` against the versions pinned in `pyproject.toml`
-(`livekit-agents` 1.7.1, `livekit-plugins-spatius` 1.7.1) at the time this was written.
-These are fast-moving packages -- if `pip install -e .` pulls a newer version and
-something breaks, re-verify the relevant signatures the same way rather than guessing
-from documentation, which lags releases.
+`backend_llm.py` 和 `worker.py` 里用到的 `livekit-agents` / `livekit-plugins-elevenlabs` / `livekit-plugins-spatius` 的确切类和方法签名，都是在写这份代码的当时，针对 `pyproject.toml` 里锁定的版本（`livekit-agents` 1.7.1、`livekit-plugins-spatius` 1.7.1）用 `python3 -c "import inspect; ..."` 逐个核实过的。这些包迭代很快 —— 如果 `pip install -e .` 装到了更新的版本导致哪里坏了，请用同样的方式重新核实相关签名，不要凭文档猜（文档通常滞后于发布）。
