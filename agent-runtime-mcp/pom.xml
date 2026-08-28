@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>ai.pivot360.agents</groupId>
+        <artifactId>agent-runtime</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>agent-runtime-mcp</artifactId>
+    <packaging>jar</packaging>
+    <name>Agent Runtime - MCP Integration</name>
+
+    <dependencies>
+        <dependency>
+            <groupId>ai.pivot360.agents</groupId>
+            <artifactId>agent-runtime-common</artifactId>
+        </dependency>
+
+        <!--
+        Client role only: agent-runtime-temporal depends on this module so its
+        ToolActivities can invoke external MCP servers. The MCP *server* role
+        (exposing this platform's own agents as MCP tools) lives in
+        agent-runtime-api instead, because it needs AgentRunService, which in
+        turn needs Temporal's WorkflowClient, and putting the server role here
+        would create a mcp to temporal to mcp circular module dependency.
+        -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-mcp-client</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>
