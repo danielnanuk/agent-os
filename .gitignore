@@ -1,0 +1,29 @@
+# Maven
+target/
+*.class
+
+# IDE / local tooling
+.idea/
+.vscode/
+.claude/
+*.iml
+*.ipr
+*.iws
+
+# OS
+.DS_Store
+
+# Java-side local env
+.env
+!.env.example
+
+# Python (voice-worker)
+voice-worker/.venv/
+voice-worker/__pycache__/
+voice-worker/**/__pycache__/
+voice-worker/*.egg-info/
+voice-worker/.pytest_cache/
+*.pyc
+
+# Logs / local scratch
+*.log
